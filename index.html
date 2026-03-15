@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seattle Parking Finder</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; display: flex; flex-direction: column; }
+
+.header { background: #1a5276; color: white; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.header h1 { font-size: 18px; font-weight: 600; }
+.header .toggle-btn { background: rgba(255,255,255,0.2); border: none; color: white; padding: 6px 12px; border-radius: 4px; font-size: 13px; cursor: pointer; }
+.header .toggle-btn:hover { background: rgba(255,255,255,0.3); }
+
+.controls { padding: 12px 16px; background: white; border-bottom: 1px solid #ddd; flex-shrink: 0; transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease; overflow: hidden; }
+.controls.collapsed { max-height: 0; padding: 0 16px; opacity: 0; border: none; }
+.form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 8px; }
+.form-group { display: flex; flex-direction: column; flex: 1; min-width: 120px; }
+.form-group label { font-size: 11px; font-weight: 600; color: #555; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+.form-group input, .form-group select { padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; -webkit-appearance: none; }
+.form-group input:focus, .form-group select:focus { outline: none; border-color: #1a5276; box-shadow: 0 0 0 2px rgba(26,82,118,0.15); }
+
+.btn { padding: 12px 20px; background: #1a5276; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+.btn:hover { background: #154360; }
+.btn:active { background: #0e2f46; }
+.btn:disabled { background: #999; cursor: not-allowed; }
+.btn-row { display: flex; gap: 8px; }
+.btn-gps { padding: 12px; background: #2980b9; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; display: flex; align-items: center; gap: 6px; -webkit-tap-highlight-color: transparent; }
+.btn-gps:hover { background: #2471a3; }
+.btn-gps:active { background: #1a5276; }
+
+#map { width: 100%; flex: 1; min-height: 200px; }
+
+.legend { position: absolute; bottom: 16px; right: 12px; background: white; padding: 10px 12px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; font-size: 12px; }
+.legend h4 { margin-bottom: 6px; font-size: 12px; }
+.legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.legend-color { width: 20px; height: 4px; border-radius: 2px; }
+
+.status-bar { padding: 8px 16px; background: #eef; font-size: 13px; color: #555; border-bottom: 1px solid #ddd; flex-shrink: 0; }
+.status-bar.error { background: #fee; color: #c00; }
+.status-bar.success { background: #efe; color: #060; }
+
+.results-summary { padding: 8px 16px; background: white; border-bottom: 1px solid #ddd; font-size: 13px; display: none; flex-shrink: 0; }
+.results-summary .stat { display: inline-block; margin-right: 14px; }
+.results-summary .stat strong { color: #1a5276; }
+
+/* Mobile-first: stack form on small screens */
+@media (max-width: 600px) {
+  .header h1 { font-size: 16px; }
+  .form-row { flex-direction: column; gap: 6px; }
+  .form-group { min-width: 100%; }
+  .btn-row { flex-direction: row; }
+  .btn { flex: 1; text-align: center; }
+  .btn-gps { justify-content: center; }
+  .legend { bottom: 12px; right: 8px; padding: 8px 10px; font-size: 11px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Seattle Parking Finder</h1>
+  <button class="toggle-btn" id="toggleBtn" onclick="toggleControls()">Hide</button>
+</div>
+
+<div class="controls" id="controlsPanel">
+  <div class="form-row">
+    <div class="form-group" style="flex: 3;">
+      <label>Destination</label>
+      <input type="text" id="address" placeholder="e.g. Pacific Science Center" value="" enterkeyhint="search">
+    </div>
+    <div class="form-group" style="flex: 1;">
+      <label>Day</label>
+      <select id="dayOfWeek">
+        <option value="sun">Sunday</option>
+        <option value="mon">Monday</option>
+        <option value="tue">Tuesday</option>
+        <option value="wed">Wednesday</option>
+        <option value="thu">Thursday</option>
+        <option value="fri">Friday</option>
+        <option value="sat" selected>Saturday</option>
+      </select>
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex: 1;">
+      <label>Time</label>
+      <input type="time" id="arrivalTime" value="13:00">
+    </div>
+    <div class="form-group" style="flex: 1;">
+      <label>Blocks to walk</label>
+      <input type="number" id="walkBlocks" value="20" min="1" max="30" inputmode="numeric">
+    </div>
+  </div>
+  <div class="form-row btn-row">
+    <button class="btn-gps" onclick="useMyLocation()">&#x1F4CD; Use My Location</button>
+    <button class="btn" id="searchBtn" onclick="findParking()" style="flex:1;">Find Parking</button>
+  </div>
+</div>
+
+<div class="status-bar" id="status">Enter an address and tap "Find Parking" to get started.</div>
+<div class="results-summary" id="resultsSummary"></div>
+<div id="map"></div>
+
+<script>
+// ========== UI CONTROLS ==========
+let controlsCollapsed = false;
+function toggleControls() {
+  const panel = document.getElementById('controlsPanel');
+  const btn = document.getElementById('toggleBtn');
+  controlsCollapsed = !controlsCollapsed;
+  panel.classList.toggle('collapsed', controlsCollapsed);
+  btn.textContent = controlsCollapsed ? 'Search' : 'Hide';
+  // Invalidate map size after transition
+  setTimeout(() => map.invalidateSize(), 350);
+}
+
+function useMyLocation() {
+  const status = document.getElementById('status');
+  if (!navigator.geolocation) {
+    status.className = 'status-bar error';
+    status.textContent = 'Geolocation not supported by your browser.';
+    return;
+  }
+  status.className = 'status-bar';
+  status.textContent = 'Getting your location...';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      // Store the GPS coordinates and run search directly
+      window._gpsLat = pos.coords.latitude;
+      window._gpsLng = pos.coords.longitude;
+      document.getElementById('address').value = `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`;
+      findParking(true); // pass flag to use GPS coords directly
+    },
+    (err) => {
+      status.className = 'status-bar error';
+      status.textContent = `Location error: ${err.message}. Try entering an address instead.`;
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+// Submit on Enter key in address field
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('address').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); findParking(); }
+  });
+});
+
+// ========== CONFIG ==========
+const BLOCK_DISTANCE_FT = 300; // ~300 feet per Seattle block
+const FT_PER_DEG_LAT = 364000; // approximate at Seattle's latitude
+const FT_PER_DEG_LNG = 288200; // approximate at Seattle's latitude (cos(47.6))
+
+const ARCGIS_BASE = 'https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/Blockface/FeatureServer/1/query';
+
+const COLORS = {
+  free: '#2ecc71',
+  rpz: '#3498db',
+  cheap: '#f1c40f',
+  moderate: '#e67e22',
+  expensive: '#e74c3c',
+  destination: '#1a5276',
+  noParking: '#bbb'
+};
+
+// ========== MAP SETUP ==========
+const map = L.map('map').setView([47.6062, -122.3321], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+// Legend
+const legend = L.control({ position: 'bottomright' });
+legend.onAdd = function() {
+  const div = L.DomUtil.create('div', 'legend');
+  div.innerHTML = `
+    <h4>Parking Rates</h4>
+    <div class="legend-item"><div class="legend-color" style="background:${COLORS.free}"></div> Free</div>
+    <div class="legend-item"><div class="legend-color" style="background:${COLORS.cheap}"></div> Under $2/hr</div>
+    <div class="legend-item"><div class="legend-color" style="background:${COLORS.moderate}"></div> $2-4/hr</div>
+    <div class="legend-item"><div class="legend-color" style="background:${COLORS.expensive}"></div> Over $4/hr</div>
+    <div style="margin-top:6px;font-size:11px;color:#666;">RPZ streets note "2hr w/o permit" in popup</div>
+  `;
+  return div;
+};
+legend.addTo(map);
+
+let parkingLayers = L.layerGroup().addTo(map);
+let destinationMarker = null;
+let radiusCircle = null;
+
+// ========== GEOCODING ==========
+async function geocodeAddress(address) {
+  // Ensure "Seattle" is in the query for better results
+  let query = address;
+  if (!query.toLowerCase().includes('seattle')) {
+    query += ', Seattle, WA';
+  }
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&viewbox=-122.45,47.48,-122.24,47.73&bounded=1`;
+  const resp = await fetch(url);
+  const results = await resp.json();
+  if (results.length === 0) throw new Error('Address not found. Try being more specific.');
+  return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), display: results[0].display_name };
+}
+
+// ========== DISTANCE CALCULATION ==========
+// Manhattan distance in feet between two lat/lng points
+function manhattanDistanceFt(lat1, lng1, lat2, lng2) {
+  const dLat = Math.abs(lat2 - lat1) * FT_PER_DEG_LAT;
+  const dLng = Math.abs(lng2 - lng1) * FT_PER_DEG_LNG;
+  return dLat + dLng;
+}
+
+// Get midpoint of a polyline path
+function getPathMidpoint(paths) {
+  const coords = paths[0];
+  if (coords.length === 0) return null;
+  const mid = Math.floor(coords.length / 2);
+  return { lat: coords[mid][1], lng: coords[mid][0] };
+}
+
+// ========== RATE LOGIC ==========
+// Convert HH:MM time string to minutes from midnight
+function timeToMinutes(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  return h * 60 + m;
+}
+
+// Get the applicable rate for a blockface given day and time
+function getRate(attrs, day, timeMinutes) {
+  let ratePrefix;
+  if (day === 'sat') ratePrefix = 'SAT';
+  else if (day === 'sun') ratePrefix = 'SUN';
+  else ratePrefix = 'WKD';
+
+  // Check each rate period (up to 3)
+  for (let i = 1; i <= 3; i++) {
+    const rate = attrs[`${ratePrefix}_RATE${i}`];
+    const start = attrs[`${ratePrefix}_START${i}`];
+    const end = attrs[`${ratePrefix}_END${i}`];
+    if (rate != null && start != null && end != null) {
+      if (timeMinutes >= start && timeMinutes <= end) {
+        return rate;
+      }
+    }
+  }
+  // No rate period matches = free at this time
+  return 0;
+}
+
+// ========== PARKING TIERS ==========
+const TIERS_BASE = 'https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/Parking_Tiers/FeatureServer/0/query';
+
+// Query tier polygons for the search bounding box
+async function queryTiers(bbox) {
+  const geometry = JSON.stringify({
+    xmin: bbox.xmin, ymin: bbox.ymin,
+    xmax: bbox.xmax, ymax: bbox.ymax,
+    spatialReference: { wkid: 4326 }
+  });
+
+  const params = new URLSearchParams({
+    where: '1=1',
+    geometry: geometry,
+    geometryType: 'esriGeometryEnvelope',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: 'PAIDAREA,TIER,MORNING_RATE,DAY_RATE,EVENING_RATE,MORNING_START,MORNING_END,DAY_START,DAY_END,EVENING_START,EVENING_END',
+    outSR: '4326',
+    returnGeometry: 'true',
+    f: 'json'
+  });
+
+  const resp = await fetch(`${TIERS_BASE}?${params}`);
+  const data = await resp.json();
+  return data.features || [];
+}
+
+// Point-in-polygon test (ray casting algorithm)
+function pointInPolygon(lat, lng, rings) {
+  for (const ring of rings) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+
+// Parse tier time string like "8AM", "11AM", "5PM" to minutes from midnight
+function parseTierTime(timeStr) {
+  if (!timeStr) return null;
+  const match = timeStr.match(/^(\d+)(AM|PM)$/i);
+  if (!match) return null;
+  let hours = parseInt(match[1]);
+  const ampm = match[2].toUpperCase();
+  if (ampm === 'PM' && hours !== 12) hours += 12;
+  if (ampm === 'AM' && hours === 12) hours = 0;
+  return hours * 60;
+}
+
+// Get tier rate for a given day and time
+function getTierRate(tierAttrs, day, timeMinutes) {
+  // Tiers only have weekday/Saturday rates; free on Sundays per Seattle policy
+  if (day === 'sun') return 0;
+
+  // Check morning, day, evening periods (same for weekday and Saturday in tiers)
+  const periods = [
+    { rate: tierAttrs.MORNING_RATE, start: parseTierTime(tierAttrs.MORNING_START), end: parseTierTime(tierAttrs.MORNING_END) },
+    { rate: tierAttrs.DAY_RATE, start: parseTierTime(tierAttrs.DAY_START), end: parseTierTime(tierAttrs.DAY_END) },
+    { rate: tierAttrs.EVENING_RATE, start: parseTierTime(tierAttrs.EVENING_START), end: parseTierTime(tierAttrs.EVENING_END) }
+  ];
+
+  for (const p of periods) {
+    if (p.rate != null && p.start != null && p.end != null) {
+      if (timeMinutes >= p.start && timeMinutes < p.end) {
+        return p.rate;
+      }
+    }
+  }
+  return 0; // Outside all paid periods = free
+}
+
+// Find which tier polygon a point falls in, with proximity fallback
+// RPZ blocks often sit just outside tier polygon boundaries but still have those rates
+function findTierForPoint(lat, lng, tierFeatures) {
+  // First try exact point-in-polygon
+  for (const tier of tierFeatures) {
+    if (tier.geometry && tier.geometry.rings) {
+      if (pointInPolygon(lat, lng, tier.geometry.rings)) {
+        return tier;
+      }
+    }
+  }
+
+  // Fallback: find nearest tier polygon within ~500ft (~0.0014 deg)
+  const PROXIMITY_THRESHOLD = 500 / FT_PER_DEG_LAT; // ~500ft in degrees
+  let nearestTier = null;
+  let nearestDist = Infinity;
+
+  for (const tier of tierFeatures) {
+    if (!tier.geometry || !tier.geometry.rings) continue;
+    // Check minimum distance from point to any vertex of the polygon
+    for (const ring of tier.geometry.rings) {
+      for (const coord of ring) {
+        const dLat = Math.abs(lat - coord[1]);
+        const dLng = Math.abs(lng - coord[0]) * (FT_PER_DEG_LNG / FT_PER_DEG_LAT); // normalize
+        const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestTier = tier;
+        }
+      }
+    }
+  }
+
+  if (nearestDist <= PROXIMITY_THRESHOLD && nearestTier) {
+    return nearestTier;
+  }
+  return null;
+}
+
+// ========== ARCGIS QUERY ==========
+async function queryBlockfaces(lat, lng, radiusFt) {
+  // Convert radius to approximate degrees for bounding box
+  const dLat = radiusFt / FT_PER_DEG_LAT;
+  const dLng = radiusFt / FT_PER_DEG_LNG;
+
+  const bbox = {
+    xmin: lng - dLng,
+    ymin: lat - dLat,
+    xmax: lng + dLng,
+    ymax: lat + dLat
+  };
+
+  const geometry = JSON.stringify({
+    xmin: bbox.xmin, ymin: bbox.ymin,
+    xmax: bbox.xmax, ymax: bbox.ymax,
+    spatialReference: { wkid: 4326 }
+  });
+
+  const fields = [
+    'UNITDESC', 'PARKING_CATEGORY', 'PAID_SPACES', 'PAIDAREA', 'TIER',
+    'WKD_RATE1', 'WKD_START1', 'WKD_END1', 'WKD_RATE2', 'WKD_START2', 'WKD_END2',
+    'WKD_RATE3', 'WKD_START3', 'WKD_END3',
+    'SAT_RATE1', 'SAT_START1', 'SAT_END1', 'SAT_RATE2', 'SAT_START2', 'SAT_END2',
+    'SAT_RATE3', 'SAT_START3', 'SAT_END3',
+    'SUN_RATE1', 'SUN_START1', 'SUN_END1', 'SUN_RATE2', 'SUN_START2', 'SUN_END2',
+    'SUN_RATE3', 'SUN_START3', 'SUN_END3',
+    'PARKING_TIME_LIMIT', 'PEAK_HOUR'
+  ].join(',');
+
+  // Only include parkable categories (exclude "No Parking Allowed" and null/unknown)
+  const where = "PARKING_CATEGORY IN ('Unrestricted Parking','Paid Parking','Time Limited Parking','Restricted Parking Zone')";
+
+  // Fetch blockfaces and tier polygons in parallel
+  let allFeatures = [];
+  let offset = 0;
+  const pageSize = 2000;
+
+  const [tierFeatures] = await Promise.all([
+    queryTiers(bbox),
+    (async () => {
+      while (true) {
+        const params = new URLSearchParams({
+          where: where,
+          geometry: geometry,
+          geometryType: 'esriGeometryEnvelope',
+          spatialRel: 'esriSpatialRelIntersects',
+          outFields: fields,
+          outSR: '4326',
+          returnGeometry: 'true',
+          resultRecordCount: pageSize.toString(),
+          resultOffset: offset.toString(),
+          f: 'json'
+        });
+
+        const resp = await fetch(`${ARCGIS_BASE}?${params}`);
+        const data = await resp.json();
+
+        if (data.error) throw new Error(`ArcGIS error: ${data.error.message}`);
+        if (!data.features || data.features.length === 0) break;
+
+        allFeatures = allFeatures.concat(data.features);
+        if (data.features.length < pageSize) break;
+        offset += pageSize;
+      }
+    })()
+  ]);
+
+  return { blockfaces: allFeatures, tierFeatures };
+}
+
+// ========== COLOR LOGIC ==========
+function getRateColor(rate, category) {
+  if (rate === 0) return COLORS.free;
+  if (rate < 2) return COLORS.cheap;
+  if (rate <= 4) return COLORS.moderate;
+  return COLORS.expensive;
+}
+
+// ========== MAIN SEARCH ==========
+const isMobile = window.innerWidth <= 600;
+const LINE_WEIGHT_FREE = isMobile ? 8 : 6;
+const LINE_WEIGHT_PAID = isMobile ? 7 : 5;
+
+async function findParking(useGps) {
+  const btn = document.getElementById('searchBtn');
+  const status = document.getElementById('status');
+  const summary = document.getElementById('resultsSummary');
+
+  btn.disabled = true;
+  status.className = 'status-bar';
+  status.textContent = 'Geocoding address...';
+  summary.style.display = 'none';
+
+  // Clear previous results
+  parkingLayers.clearLayers();
+  if (destinationMarker) { map.removeLayer(destinationMarker); destinationMarker = null; }
+  if (radiusCircle) { map.removeLayer(radiusCircle); radiusCircle = null; }
+
+  try {
+    // 1. Geocode (or use GPS coordinates)
+    let loc;
+    if (useGps && window._gpsLat && window._gpsLng) {
+      loc = { lat: window._gpsLat, lng: window._gpsLng, display: 'Your Location' };
+    } else {
+      const address = document.getElementById('address').value.trim();
+      if (!address) throw new Error('Please enter a destination address.');
+      loc = await geocodeAddress(address);
+    }
+
+    // 2. Get params
+    const day = document.getElementById('dayOfWeek').value;
+    const timeStr = document.getElementById('arrivalTime').value;
+    const blocks = parseInt(document.getElementById('walkBlocks').value) || 5;
+    const timeMinutes = timeToMinutes(timeStr);
+    const radiusFt = blocks * BLOCK_DISTANCE_FT;
+
+    // 3. Show destination
+    destinationMarker = L.marker([loc.lat, loc.lng], {
+      icon: L.divIcon({
+        className: '',
+        html: `<div style="background:${COLORS.destination};color:white;padding:6px 10px;border-radius:20px;font-size:12px;font-weight:bold;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);">Your Destination</div>`,
+        iconAnchor: [50, 15]
+      })
+    }).addTo(map);
+
+    // Show walking radius (approximate circle using Manhattan distance visualization)
+    const dLat = radiusFt / FT_PER_DEG_LAT;
+    const dLng = radiusFt / FT_PER_DEG_LNG;
+    // Draw a diamond shape for Manhattan distance
+    radiusCircle = L.polygon([
+      [loc.lat + dLat, loc.lng],
+      [loc.lat, loc.lng + dLng],
+      [loc.lat - dLat, loc.lng],
+      [loc.lat, loc.lng - dLng]
+    ], {
+      color: '#1a5276',
+      weight: 2,
+      fillColor: '#1a5276',
+      fillOpacity: 0.05,
+      dashArray: '8 4'
+    }).addTo(map);
+
+    // 4. Query parking data (blockfaces + tier polygons in parallel)
+    status.textContent = `Searching for parking within ${blocks} blocks...`;
+    const { blockfaces: features, tierFeatures } = await queryBlockfaces(loc.lat, loc.lng, radiusFt);
+
+    // 5. Process and filter by Manhattan distance
+    const dayLabel = { sun: 'Sunday', mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday' }[day];
+    const timeLabel = document.getElementById('arrivalTime').value;
+
+    let results = [];
+    for (const f of features) {
+      const mid = getPathMidpoint(f.geometry.paths);
+      if (!mid) continue;
+
+      const dist = manhattanDistanceFt(loc.lat, loc.lng, mid.lat, mid.lng);
+      if (dist > radiusFt) continue; // Outside Manhattan distance radius
+
+      let rate = getRate(f.attributes, day, timeMinutes);
+      const timeLimit = f.attributes.PARKING_TIME_LIMIT;
+      const category = f.attributes.PARKING_CATEGORY;
+
+      // For blockfaces with 0 rate, check if they fall inside a Parking Tier zone
+      // (RPZ and other blocks may have rates from the tier overlay not in blockface data)
+      if (rate === 0 && category !== 'Unrestricted Parking') {
+        const tier = findTierForPoint(mid.lat, mid.lng, tierFeatures);
+        if (tier) {
+          const tierRate = getTierRate(tier.attributes, day, timeMinutes);
+          if (tierRate > 0) {
+            rate = tierRate;
+            // Store tier info for popup display
+            f.attributes._tierArea = tier.attributes.PAIDAREA;
+          }
+        }
+      }
+
+      results.push({
+        attrs: f.attributes,
+        geometry: f.geometry,
+        midpoint: mid,
+        distanceFt: dist,
+        distanceBlocks: Math.round(dist / BLOCK_DISTANCE_FT * 10) / 10,
+        rate: rate,
+        timeLimit: timeLimit,
+        category: category
+      });
+    }
+
+    // 6. Sort: free first, then by rate, then by distance
+    results.sort((a, b) => {
+      if (a.rate !== b.rate) return a.rate - b.rate;
+      return a.distanceFt - b.distanceFt;
+    });
+
+    // 7. Display on map — draw paid first, then free/RPZ on top so they're visible
+    const freeCount = results.filter(r => r.rate === 0).length;
+    const rpzCount = results.filter(r => r.category === 'Restricted Parking Zone').length;
+    const paidCount = results.filter(r => r.rate > 0).length;
+
+    // Draw paid streets first (underneath)
+    const paidResults = results.filter(r => r.rate > 0);
+    const freeResults = results.filter(r => r.rate === 0);
+
+    for (const r of [...paidResults, ...freeResults]) {
+      const coords = r.geometry.paths[0].map(c => [c[1], c[0]]);
+      const color = getRateColor(r.rate, r.category);
+      const weight = r.rate === 0 ? LINE_WEIGHT_FREE : LINE_WEIGHT_PAID;
+
+      const line = L.polyline(coords, {
+        color: color,
+        weight: weight,
+        opacity: 0.85
+      }).addTo(parkingLayers);
+
+      // Build popup
+      const popupColor = getRateColor(r.rate, r.category);
+      let popupContent = `<div style="font-size:13px;line-height:1.5;">`;
+      popupContent += `<strong style="font-size:14px;">${r.attrs.UNITDESC}</strong><br>`;
+
+      if (r.rate === 0) {
+        popupContent += `<span style="color:${COLORS.free};font-weight:bold;">FREE</span> at this time<br>`;
+      } else {
+        popupContent += `<span style="font-weight:bold;color:${popupColor};">$${r.rate.toFixed(2)}/hr</span><br>`;
+      }
+
+      if (r.category === 'Restricted Parking Zone') {
+        popupContent += `<em>RPZ: 2hr limit without neighborhood permit</em><br>`;
+      }
+
+      if (r.category === 'Paid Parking' && r.rate === 0) {
+        popupContent += `<em>Paid zone, but free on ${dayLabel} at ${timeLabel}</em><br>`;
+      } else if (r.category === 'Unrestricted Parking') {
+        popupContent += `<em>Unrestricted street parking</em><br>`;
+      } else if (r.category === 'Time Limited Parking') {
+        popupContent += `<em>Time-limited parking</em><br>`;
+      }
+
+      if (r.timeLimit && r.category !== 'Restricted Parking Zone') {
+        const hrs = r.timeLimit / 60;
+        popupContent += `Time limit: ${hrs >= 1 ? hrs + ' hour' + (hrs > 1 ? 's' : '') : r.timeLimit + ' min'}<br>`;
+      }
+
+      if (r.attrs.PEAK_HOUR) {
+        popupContent += `Peak hours: ${r.attrs.PEAK_HOUR}<br>`;
+      }
+
+      popupContent += `Walking: ~${r.distanceBlocks} blocks<br>`;
+      popupContent += `</div>`;
+
+      line.bindPopup(popupContent);
+    }
+
+    // 8. Fit map to results
+    if (results.length > 0) {
+      const allCoords = results.flatMap(r => r.geometry.paths[0].map(c => [c[1], c[0]]));
+      allCoords.push([loc.lat, loc.lng]);
+      map.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+    } else {
+      map.setView([loc.lat, loc.lng], 15);
+    }
+
+    // 9. Show summary and collapse form on mobile to maximize map
+    if (isMobile && !controlsCollapsed) {
+      toggleControls();
+    }
+    status.className = 'status-bar success';
+    status.textContent = `Found ${results.length} parking options within ${blocks} blocks on ${dayLabel} at ${timeLabel}.`;
+
+    summary.style.display = 'block';
+    let summaryHtml = '';
+    if (freeCount > 0) {
+      summaryHtml += `<span class="stat"><strong>${freeCount}</strong> free streets</span>`;
+    }
+    if (rpzCount > 0) {
+      summaryHtml += `<span class="stat"><strong>${rpzCount}</strong> RPZ (2hr limit w/o permit)</span>`;
+    }
+    if (paidCount > 0) {
+      const cheapest = results.filter(r => r.rate > 0).sort((a, b) => a.rate - b.rate)[0];
+      summaryHtml += `<span class="stat"><strong>${paidCount}</strong> paid options</span>`;
+      if (cheapest) {
+        summaryHtml += `<span class="stat">Cheapest paid: <strong>$${cheapest.rate.toFixed(2)}/hr</strong> (${cheapest.attrs.UNITDESC})</span>`;
+      }
+    }
+    if (results.length === 0) {
+      summaryHtml = 'No parking found in this radius. Try increasing the number of blocks.';
+    }
+    summary.innerHTML = summaryHtml;
+
+  } catch (err) {
+    status.className = 'status-bar error';
+    status.textContent = `Error: ${err.message}`;
+    summary.style.display = 'none';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Auto-detect day of week and current time
+(function() {
+  const now = new Date();
+  const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  document.getElementById('dayOfWeek').value = days[now.getDay()];
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('arrivalTime').value = `${hh}:${mm}`;
+})();
+</script>
+</body>
+</html>
